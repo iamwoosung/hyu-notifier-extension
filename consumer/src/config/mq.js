@@ -1,12 +1,26 @@
 const amqplib = require('amqplib');
 const logger = require('../modules/logger');
 
-const EXCHANGE = 'hyu.notifier';
-const QUEUE = 'lms_sync_queue';
-const RECONNECT_INTERVAL = 5000; // 5초
-
 async function connectWithRetry(handlers, attempt = 1) {
-  const url = process.env.MQ_URL || 'amqp://guest:guest@localhost:5672';
+  // 환경변수 검증
+  const requiredVars = ['MQ_HOST', 'MQ_PORT', 'MQ_USER', 'MQ_PASSWORD', 'MQ_EXCHANGE', 'MQ_QUEUE', 'MQ_ROUTING_KEY'];
+  const missing = requiredVars.filter(v => !process.env[v]);
+  if (missing.length > 0) {
+    throw new Error(`필수 환경변수가 누락되었습니다: ${missing.join(', ')}`);
+  }
+
+  // 환경변수에서 MQ 접속정보 읽기
+  const mqHost = process.env.MQ_HOST;
+  const mqPort = parseInt(process.env.MQ_PORT);
+  const mqUser = process.env.MQ_USER;
+  const mqPassword = process.env.MQ_PASSWORD;
+  const url = `amqp://${mqUser}:${mqPassword}@${mqHost}:${mqPort}`;
+
+  // 환경변수에서 Exchange, Queue, RoutingKey 읽기
+  const EXCHANGE = process.env.MQ_EXCHANGE;
+  const QUEUE = process.env.MQ_QUEUE;
+  const ROUTING_KEY = process.env.MQ_ROUTING_KEY;
+  const RECONNECT_INTERVAL = 5000; // 5초
 
   try {
     const conn = await amqplib.connect(url);
@@ -14,11 +28,11 @@ async function connectWithRetry(handlers, attempt = 1) {
 
     await channel.assertExchange(EXCHANGE, 'topic', { durable: true });
     await channel.assertQueue(QUEUE, { durable: true });
-    await channel.bindQueue(QUEUE, EXCHANGE, 'lms.sync');
+    await channel.bindQueue(QUEUE, EXCHANGE, ROUTING_KEY);
 
     channel.prefetch(1); // 한 번에 하나씩 처리
 
-    logger.info(`RabbitMQ Consumer : ready [exchange=${EXCHANGE}, queue=${QUEUE}, key=lms.sync]`);
+    logger.info(`RabbitMQ Consumer : ready [exchange=${EXCHANGE}, queue=${QUEUE}, key=${ROUTING_KEY}]`);
 
     channel.consume(QUEUE, async (msg) => {
       if (!msg) return;

@@ -3,12 +3,21 @@ const logger = require('../../modules/logger');
 
 const RECONNECT_INTERVAL = 5000; // 5초
 
+// 환경변수 검증
+const requiredDBVars = ['DB_HOST', 'DB_PORT', 'DB_NAME', 'DB_USER', 'DB_PASSWORD'];
+const missingDBVars = requiredDBVars.filter(v => !process.env[v]);
+if (missingDBVars.length > 0) {
+  const errorMsg = `필수 DB 환경변수가 누락되었습니다: ${missingDBVars.join(', ')}`;
+  console.error(errorMsg);
+  // 초기화 시점이 아직 logger가 준비되지 않았을 수 있으므로 exit하지 않음
+}
+
 const pool = new Pool({
-  host:     process.env.DB_HOST     || 'localhost',
-  port:     parseInt(process.env.DB_PORT || '5432'),
-  database: process.env.DB_NAME     || process.env.POSTGRES_DB,
-  user:     process.env.DB_USER     || process.env.POSTGRES_USER,
-  password: process.env.DB_PASSWORD || process.env.POSTGRES_PASSWORD,
+  host:     process.env.DB_HOST,
+  port:     parseInt(process.env.DB_PORT),
+  database: process.env.DB_NAME,
+  user:     process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
 });
 
 const initWithRetry = async (attempt = 1) => {

@@ -17,7 +17,11 @@ async function sync(req, res) {
   }
 
   try {
-    const messageId = await mq.publish('lms.sync', { session: sessionId, user, cookies });
+    if (!process.env.MQ_ROUTING_KEY) {
+      throw new Error('MQ_ROUTING_KEY 환경변수가 필요합니다');
+    }
+    const routingKey = process.env.MQ_ROUTING_KEY;
+    const messageId = await mq.publish(routingKey, { session: sessionId, user, cookies });
     logger.info(`[LMS sync] MQ 전송 완료 | messageId: ${messageId}`);
     res.status(202).json({ success: true, messageId });
   } catch (e) {
