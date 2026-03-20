@@ -182,15 +182,23 @@ function subscribeToSyncStatus(userUUID, onComplete, onFail) {
     });
 }
 
+// ─── 동기화 선택 모달 ─────────────────────────────────────────────────────────
+
+document.getElementById('sync-btn').addEventListener('click', () => {
+  document.getElementById('sync-select-modal').classList.remove('hidden');
+});
+
 // ─── LMS 동기화 ───────────────────────────────────────────────────────────────
 
-document.getElementById('sync-btn').addEventListener('click', async () => {
+async function startLmsSync() {
+  document.getElementById('sync-select-modal').classList.add('hidden');
+
   const btn = document.getElementById('sync-btn');
   btn.disabled = true;
   btn.textContent = '동기화 중...';
 
   const { session, userUUID } = await chrome.storage.local.get(['session', 'userUUID']);
-  dbg(`Sync 시작 | userUUID: ${userUUID ?? '(없음)'}`);
+  dbg(`LMS Sync 시작 | userUUID: ${userUUID ?? '(없음)'}`);
 
   // Realtime 구독 먼저 시작 (서버 요청 전에 구독해야 이벤트 누락 없음)
   if (userUUID) {
@@ -211,7 +219,6 @@ document.getElementById('sync-btn').addEventListener('click', async () => {
   }
 
   chrome.runtime.sendMessage({ action: 'SYNC_LMS', session }, async (response) => {
-    // 팝업 컨텍스트 소멸로 응답 못 받는 경우 무시
     if (chrome.runtime.lastError) return;
 
     dbg(`서버 응답: ${JSON.stringify(response)}`);
@@ -219,14 +226,128 @@ document.getElementById('sync-btn').addEventListener('click', async () => {
     if (response?.success) {
       dbg('MQ 전송 완료. Realtime 이벤트 대기 중...');
     } else {
-      // Realtime 구독 해제
       if (realtimeChannel) { realtimeChannel.unsubscribe(); realtimeChannel = null; }
       console.error('[LMS 동기화 실패]', response?.error);
       btn.textContent = '⚠ 오류 발생';
       setTimeout(() => { btn.textContent = '동기화'; btn.disabled = false; }, 2000);
     }
   });
-});
+}
+
+document.getElementById('sync-lms-btn').addEventListener('click', startLmsSync);
+
+// ─── SELC 동기화 ──────────────────────────────────────────────────────────────
+
+let selcCountdownTimer = null;
+
+function showSelcWaiting() {
+  const body = document.getElementById('sync-select-body');
+  let remaining = 60;
+  body.innerHTML = `
+    <div class="selc-waiting">
+      <div class="wait-icon">📘</div>
+      <p>SELC 사이트에서 로그인해 주세요.<br>로그인이 감지되면 자동으로 동기화됩니다.</p>
+      <div class="selc-countdown" id="selc-countdown">${remaining}초</div>
+      <button class="selc-cancel-btn" id="selc-cancel-btn">취소</button>
+    </div>
+  `;
+
+  selcCountdownTimer = setInterval(() => {
+    remaining--;
+    const el = document.getElementById('selc-countdown');
+    if (el) el.textContent = `${remaining}초`;
+    if (remaining <= 0) clearInterval(selcCountdownTimer);
+  }, 1000);
+
+  document.getElementById('selc-cancel-btn').addEventListener('click', () => {
+    clearInterval(selcCountdownTimer);
+    chrome.runtime.sendMessage({ action: 'SELC_CANCEL' }).catch(() => {});
+    resetSelcModal();
+  });
+}
+
+function resetSelcModal() {
+  clearInterval(selcCountdownTimer);
+  const modal = document.getElementById('sync-select-modal');
+  modal.classList.add('hidden');
+  // 모달 바디 원상복구
+  document.getElementById('sync-select-body').innerHTML = `
+    <button class="sync-option-btn" id="sync-lms-btn">
+      <span class="sync-option-icon">🎓</span>
+      <span class="sync-option-text">
+        <span class="sync-option-title">LMS 동기화</span>
+        <span class="sync-option-desc">한양대 LMS 과제 · 영상 일정 동기화</span>
+      </span>
+    </button>
+    <button class="sync-option-btn" id="sync-selc-btn">
+      <span class="sync-option-icon">📘</span>
+      <span class="sync-option-text">
+        <span class="sync-option-title">SELC 동기화</span>
+        <span class="sync-option-desc">SELC 학점인정 컨소시엄 강의 동기화</span>
+      </span>
+    </button>
+  `;
+  // 이벤트 재등록
+  document.getElementById('sync-lms-btn').addEventListener('click', startLmsSync);
+  attachSelcBtn();
+}
+
+function attachSelcBtn() {
+  document.getElementById('sync-selc-btn').addEventListener('click', startSelcSync);
+}
+
+function startSelcSync() {
+  chrome.storage.local.get(['session', 'userUUID'], ({ session, userUUID }) => {
+    dbg('SELC Sync 시작');
+
+    const btn = document.getElementById('sync-btn');
+    btn.disabled = true;
+    btn.textContent = '동기화 중...';
+
+    // Realtime 구독 먼저 시작 (MQ 전송 전에 구독해야 이벤트 누락 없음)
+    if (userUUID) {
+      subscribeToSyncStatus(
+        userUUID,
+        () => {
+          showToast('✓ SELC 동기화 완료!', 'success');
+          btn.textContent = '동기화';
+          btn.disabled = false;
+          loadCalendar();
+        },
+        () => {
+          showToast('✗ SELC 동기화 실패. 다시 시도해주세요.', 'error');
+          btn.textContent = '동기화';
+          btn.disabled = false;
+        }
+      );
+    }
+
+    showSelcWaiting();
+
+    chrome.runtime.sendMessage({ action: 'SYNC_SELC', session }, (response) => {
+      if (chrome.runtime.lastError) return;
+      clearInterval(selcCountdownTimer);
+
+      if (response?.success) {
+        dbg('SELC MQ 전송 완료. Realtime 이벤트 대기 중...');
+      } else if (response?.cancelled) {
+        dbg('SELC 동기화 취소됨');
+        if (realtimeChannel) { realtimeChannel.unsubscribe(); realtimeChannel = null; }
+        btn.textContent = '동기화';
+        btn.disabled = false;
+      } else {
+        showToast('✗ SELC 동기화 실패. 다시 시도해주세요.', 'error');
+        dbg(`SELC 동기화 실패: ${response?.error}`);
+        if (realtimeChannel) { realtimeChannel.unsubscribe(); realtimeChannel = null; }
+        btn.textContent = '동기화';
+        btn.disabled = false;
+      }
+      resetSelcModal();
+    });
+  });
+}
+
+document.getElementById('sync-selc-btn').addEventListener('click', startSelcSync);
 
 // ─── 초기 자동 동기화 Realtime 구독 ──────────────────────────────────────────
 

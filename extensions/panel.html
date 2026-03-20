@@ -175,6 +175,88 @@
     #sync-btn:hover { background: #0052aa; }
     #sync-btn:disabled { opacity: 0.55; cursor: not-allowed; }
 
+    /* ─── Sync Select Modal ───────────────── */
+    .sync-select-body {
+      display: flex;
+      flex-direction: row;
+      gap: 12px;
+      padding: 20px 16px;
+    }
+
+    .sync-option-btn {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      flex: 1;
+      aspect-ratio: 1 / 1;
+      padding: 16px 8px;
+      border: 1.5px solid #e0e0e0;
+      border-radius: 12px;
+      background: #fff;
+      cursor: pointer;
+      text-align: center;
+      transition: border-color 0.15s, background 0.15s;
+    }
+
+    .sync-option-btn:hover { border-color: #0062cc; background: #f0f6ff; }
+
+    .sync-option-icon { font-size: 28px; }
+
+    .sync-option-text { display: flex; flex-direction: column; gap: 4px; }
+
+    .sync-option-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: #1a1a2e;
+    }
+
+    .sync-option-desc {
+      font-size: 10px;
+      color: #888;
+      line-height: 1.4;
+      word-break: keep-all;
+    }
+
+    /* SELC 대기 상태 */
+    .selc-waiting {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      padding: 24px 16px;
+      text-align: center;
+    }
+
+    .selc-waiting .wait-icon { font-size: 36px; }
+
+    .selc-waiting p {
+      font-size: 13px;
+      color: #444;
+      line-height: 1.7;
+    }
+
+    .selc-countdown {
+      font-size: 20px;
+      font-weight: 700;
+      color: #0062cc;
+    }
+
+    .selc-cancel-btn {
+      margin-top: 4px;
+      padding: 8px 20px;
+      background: none;
+      border: 1.5px solid #ccc;
+      border-radius: 8px;
+      font-size: 13px;
+      color: #666;
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+    }
+
+    .selc-cancel-btn:hover { border-color: #888; color: #333; }
+
     .main-content {
       flex: 1;
       overflow-y: auto;
@@ -419,6 +501,32 @@
         <div id="calendar"></div>
       </div>
     </main>
+  </div>
+
+  <!-- 동기화 선택 모달 -->
+  <div id="sync-select-modal" class="modal-overlay hidden">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3>동기화 선택</h3>
+        <button class="modal-close" data-modal="sync-select-modal">&times;</button>
+      </div>
+      <div id="sync-select-body" class="sync-select-body">
+        <button class="sync-option-btn" id="sync-lms-btn">
+          <span class="sync-option-icon">🎓</span>
+          <span class="sync-option-text">
+            <span class="sync-option-title">LMS 동기화</span>
+            <span class="sync-option-desc">한양대 LMS<br>과제 · 영상 동기화</span>
+          </span>
+        </button>
+        <button class="sync-option-btn" id="sync-selc-btn">
+          <span class="sync-option-icon">📘</span>
+          <span class="sync-option-text">
+            <span class="sync-option-title">SELC 동기화</span>
+            <span class="sync-option-desc">학점인정 컨소시엄<br>강의 동기화</span>
+          </span>
+        </button>
+      </div>
+    </div>
   </div>
 
   <!-- 서비스 안내 모달 -->

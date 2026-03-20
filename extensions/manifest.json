@@ -6,6 +6,7 @@
   "permissions": ["storage", "identity", "cookies", "tabs", "sidePanel"],
   "host_permissions": [
     "https://learning.hanyang.ac.kr/*",
+    "https://selc.or.kr/*",
     "http://localhost:3000/*",
     "http://localhost:4000/*"
   ],

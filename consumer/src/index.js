@@ -5,10 +5,12 @@ const logger = require('./modules/logger');
 const db = require('./modules/db');
 const mq = require('./config/mq');
 const lmsSync = require('./handlers/lmsSync');
+const selcSync = require('./handlers/selcSync');
 
 // 메시지 타입 → 핸들러 매핑
 const handlers = {
   LMS_SYNC: lmsSync.handle,
+  SELC_SYNC: selcSync.handle,
 };
 
 (async () => {

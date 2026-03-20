@@ -30,6 +30,13 @@ async function connectWithRetry(handlers, attempt = 1) {
     await channel.assertQueue(QUEUE, { durable: true });
     await channel.bindQueue(QUEUE, EXCHANGE, ROUTING_KEY);
 
+    // SELC 라우팅 키가 있으면 같은 큐에 추가 바인딩
+    const SELC_ROUTING_KEY = process.env.MQ_SELC_ROUTING_KEY;
+    if (SELC_ROUTING_KEY) {
+      await channel.bindQueue(QUEUE, EXCHANGE, SELC_ROUTING_KEY);
+      logger.info(`RabbitMQ SELC 바인딩 추가 [key=${SELC_ROUTING_KEY}]`);
+    }
+
     channel.prefetch(1); // 한 번에 하나씩 처리
 
     logger.info(`RabbitMQ Consumer : ready [exchange=${EXCHANGE}, queue=${QUEUE}, key=${ROUTING_KEY}]`);

@@ -126,9 +126,96 @@ async function getXnApiToken() {
   });
 }
 
+// ─── SELC 쿠키 대기 (RSN_JSESSIONID) ─────────────────────────────────────────
+
+let selcSyncAbort = null; // 진행 중인 SELC 동기화를 취소하는 함수
+
+async function waitForSelcCookie(timeoutMs = 60000) {
+  return new Promise((resolve) => {
+    let done = false;
+    let selcTabId = null;
+    let pollInterval = null;
+
+    const timer = setTimeout(() => finish({ timeout: true }), timeoutMs);
+
+    selcSyncAbort = () => finish({ cancelled: true });
+
+    function finish(result) {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      if (pollInterval) clearInterval(pollInterval);
+      selcSyncAbort = null;
+      if (selcTabId) chrome.tabs.remove(selcTabId).catch(() => {});
+      resolve(result);
+    }
+
+    // selc.or.kr 탭 오픈 (사용자가 로그인해야 하므로 active)
+    chrome.tabs.create({ url: 'https://selc.or.kr', active: true })
+      .then(tab => {
+        selcTabId = tab.id;
+
+        pollInterval = setInterval(async () => {
+          try {
+            const cookies = await chrome.cookies.getAll({ domain: 'selc.or.kr' });
+            const sessionCookie = cookies.find(c => c.name === 'RSN_JSESSIONID');
+            if (sessionCookie) {
+              finish({ cookie: sessionCookie.value });
+            }
+          } catch (_) {}
+        }, 2000);
+      })
+      .catch(() => finish({ error: 'TAB_CREATE_FAILED' }));
+  });
+}
+
 // ─── 메시지 핸들러 ────────────────────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
+
+  if (request.action === 'SELC_CANCEL') {
+    if (selcSyncAbort) selcSyncAbort();
+    return;
+  }
+
+  if (request.action === 'SYNC_SELC') {
+    const trySend = (msg) => { try { sendResponse(msg); } catch (_) {} };
+
+    (async () => {
+      try {
+        chrome.runtime.sendMessage({ action: 'DEBUG_LOG', msg: '[SYNC_SELC] SELC 쿠키 대기 시작 (최대 60초)' }).catch(() => {});
+
+        const result = await waitForSelcCookie(60000);
+
+        if (result.cancelled) {
+          trySend({ success: false, cancelled: true });
+          return;
+        }
+        if (result.timeout || result.error || !result.cookie) {
+          chrome.runtime.sendMessage({ action: 'DEBUG_LOG', msg: `[SYNC_SELC] 쿠키 취득 실패: ${JSON.stringify(result)}` }).catch(() => {});
+          trySend({ success: false, error: result.error || 'TIMEOUT' });
+          return;
+        }
+
+        chrome.runtime.sendMessage({ action: 'DEBUG_LOG', msg: '[SYNC_SELC] RSN_JSESSIONID 취득 완료 → 서버 전송' }).catch(() => {});
+
+        const res = await fetch(`${SERVER_URL}/api/selc/sync`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session: request.session, cookies: { RSN_JSESSIONID: result.cookie } }),
+        });
+
+        if (!res.ok) throw new Error(`서버 오류: ${res.status}`);
+
+        chrome.runtime.sendMessage({ action: 'DEBUG_LOG', msg: '[SYNC_SELC] 서버 전송 완료' }).catch(() => {});
+        trySend({ success: true });
+      } catch (error) {
+        chrome.runtime.sendMessage({ action: 'DEBUG_LOG', msg: `[SYNC_SELC] 오류: ${error.message}` }).catch(() => {});
+        trySend({ success: false, error: error.message });
+      }
+    })();
+    return true;
+  }
 
   if (request.action === 'SYNC_LMS') {
     const trySend = (msg) => { try { sendResponse(msg); } catch (_) {} };

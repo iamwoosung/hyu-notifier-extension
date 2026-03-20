@@ -393,3 +393,139 @@ BEGIN
     ORDER BY s."Semester" DESC, s."SubjectInsertDate" ASC;
 END;
 $$;
+
+-- =============================================
+-- FN: SELC_ASSIGNMENT_SYNC (SELC 퀴즈 과제 동기화)
+-- SubjectName 부분 일치로 SubjectNo 조회 후 UPSERT
+-- ID는 제목 해시로 생성 (LmsAssignmentID 대체)
+-- 반환: 0 = 성공, 9999 = 실패
+-- =============================================
+DROP FUNCTION IF EXISTS "SELC_ASSIGNMENT_SYNC"(INTEGER, VARCHAR, JSONB);
+
+CREATE OR REPLACE FUNCTION "SELC_ASSIGNMENT_SYNC"(
+    p_UserNo      INTEGER,
+    p_SubjectName VARCHAR(255),
+    p_Assignments JSONB
+)
+RETURNS INTEGER
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_SubjectNo INTEGER;
+    v_Item      JSONB;
+    v_Title     VARCHAR(500);
+    v_AssignID  INTEGER;
+BEGIN
+    SELECT "SubjectNo" INTO v_SubjectNo
+    FROM "Subject"
+    WHERE "UserNo" = p_UserNo
+      AND "DeleteFlag" = 0
+      AND (REGEXP_REPLACE(p_SubjectName, '[\s\-:()_\[\]/.]+', '', 'g')
+               ILIKE '%' || REGEXP_REPLACE("SubjectName", '[\s\-:()_\[\]/.]+', '', 'g') || '%'
+           OR REGEXP_REPLACE("SubjectName", '[\s\-:()_\[\]/.]+', '', 'g')
+               ILIKE '%' || REGEXP_REPLACE(p_SubjectName, '[\s\-:()_\[\]/.]+', '', 'g') || '%')
+    LIMIT 1;
+
+    IF v_SubjectNo IS NULL THEN RETURN 9999; END IF;
+
+    FOR v_Item IN SELECT jsonb_array_elements(p_Assignments)
+    LOOP
+        v_Title    := v_Item->>'Title';
+        v_AssignID := (hashtext(v_Title) & 2147483647);
+
+        INSERT INTO "Assignment" (
+            "SubjectNo", "LmsAssignmentID", "Title",
+            "IsSubmitted", "WorkflowState",
+            "PeriodStart", "PeriodEnd",
+            "AssignmentInsertDate", "AssignmentUpdateDate"
+        ) VALUES (
+            v_SubjectNo,
+            v_AssignID,
+            v_Title,
+            (v_Item->>'IsSubmitted')::BOOLEAN,
+            NULL, NULL, NULL,
+            NOW(), NOW()
+        )
+        ON CONFLICT ("SubjectNo", "LmsAssignmentID")
+        DO UPDATE SET
+            "Title"                = EXCLUDED."Title",
+            "IsSubmitted"          = EXCLUDED."IsSubmitted",
+            "AssignmentUpdateDate" = NOW();
+    END LOOP;
+
+    RETURN 0;
+
+EXCEPTION
+    WHEN OTHERS THEN
+        RAISE WARNING 'SELC_ASSIGNMENT_SYNC Error - SQLSTATE: %, Message: %', SQLSTATE, SQLERRM;
+        RETURN 9999;
+END;
+$$;
+
+-- =============================================
+-- FN: SELC_VIDEO_SYNC (SELC 동영상 시청 현황 동기화)
+-- SubjectName 부분 일치로 SubjectNo 조회 후 UPSERT
+-- ID는 제목 해시로 생성 (LmsItemID 대체)
+-- 반환: 0 = 성공, 9999 = 실패
+-- =============================================
+DROP FUNCTION IF EXISTS "SELC_VIDEO_SYNC"(INTEGER, VARCHAR, JSONB);
+
+CREATE OR REPLACE FUNCTION "SELC_VIDEO_SYNC"(
+    p_UserNo      INTEGER,
+    p_SubjectName VARCHAR(255),
+    p_Videos      JSONB
+)
+RETURNS INTEGER
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_SubjectNo INTEGER;
+    v_Item      JSONB;
+    v_Title     VARCHAR(500);
+    v_ItemID    BIGINT;
+BEGIN
+    SELECT "SubjectNo" INTO v_SubjectNo
+    FROM "Subject"
+    WHERE "UserNo" = p_UserNo
+      AND "DeleteFlag" = 0
+      AND (REGEXP_REPLACE(p_SubjectName, '[\s\-:()_\[\]/.]+', '', 'g')
+               ILIKE '%' || REGEXP_REPLACE("SubjectName", '[\s\-:()_\[\]/.]+', '', 'g') || '%'
+           OR REGEXP_REPLACE("SubjectName", '[\s\-:()_\[\]/.]+', '', 'g')
+               ILIKE '%' || REGEXP_REPLACE(p_SubjectName, '[\s\-:()_\[\]/.]+', '', 'g') || '%')
+    LIMIT 1;
+
+    IF v_SubjectNo IS NULL THEN RETURN 9999; END IF;
+
+    FOR v_Item IN SELECT jsonb_array_elements(p_Videos)
+    LOOP
+        v_Title  := v_Item->>'Title';
+        v_ItemID := ABS(hashtext(v_Title)::BIGINT);
+
+        INSERT INTO "Video" (
+            "SubjectNo", "LmsItemID", "Title",
+            "IsWatched", "DurationSec",
+            "PeriodStart", "PeriodEnd",
+            "VideoInsertDate", "VideoUpdateDate"
+        ) VALUES (
+            v_SubjectNo,
+            v_ItemID,
+            v_Title,
+            (v_Item->>'IsWatched')::BOOLEAN,
+            NULL, NULL, NULL,
+            NOW(), NOW()
+        )
+        ON CONFLICT ("SubjectNo", "LmsItemID")
+        DO UPDATE SET
+            "Title"           = EXCLUDED."Title",
+            "IsWatched"       = EXCLUDED."IsWatched",
+            "VideoUpdateDate" = NOW();
+    END LOOP;
+
+    RETURN 0;
+
+EXCEPTION
+    WHEN OTHERS THEN
+        RAISE WARNING 'SELC_VIDEO_SYNC Error - SQLSTATE: %, Message: %', SQLSTATE, SQLERRM;
+        RETURN 9999;
+END;
+$$;
