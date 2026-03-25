@@ -190,9 +190,25 @@ document.getElementById('sync-btn').addEventListener('click', () => {
 
 // ─── LMS 동기화 ───────────────────────────────────────────────────────────────
 
-async function startLmsSync() {
-  document.getElementById('sync-select-modal').classList.add('hidden');
+function showLmsWaiting() {
+  const body = document.getElementById('sync-select-body');
+  body.innerHTML = `
+    <div class="selc-waiting">
+      <div class="wait-icon">🎓</div>
+      <p>LMS를 동기화하고 있습니다.<br>잠시만 기다려 주세요.</p>
+      <button class="selc-cancel-btn" id="lms-cancel-btn">취소</button>
+    </div>
+  `;
+  document.getElementById('lms-cancel-btn').addEventListener('click', () => {
+    if (realtimeChannel) { realtimeChannel.unsubscribe(); realtimeChannel = null; }
+    const btn = document.getElementById('sync-btn');
+    btn.textContent = '동기화';
+    btn.disabled = false;
+    resetSyncModal();
+  });
+}
 
+async function startLmsSync() {
   const btn = document.getElementById('sync-btn');
   btn.disabled = true;
   btn.textContent = '동기화 중...';
@@ -209,14 +225,18 @@ async function startLmsSync() {
         btn.textContent = '동기화';
         btn.disabled = false;
         loadCalendar();
+        resetSyncModal();
       },
       () => {
         showToast('✗ 동기화 실패. 다시 시도해주세요.', 'error');
         btn.textContent = '동기화';
         btn.disabled = false;
+        resetSyncModal();
       }
     );
   }
+
+  showLmsWaiting();
 
   chrome.runtime.sendMessage({ action: 'SYNC_LMS', session }, async (response) => {
     if (chrome.runtime.lastError) return;
@@ -230,6 +250,7 @@ async function startLmsSync() {
       console.error('[LMS 동기화 실패]', response?.error);
       btn.textContent = '⚠ 오류 발생';
       setTimeout(() => { btn.textContent = '동기화'; btn.disabled = false; }, 2000);
+      resetSyncModal();
     }
   });
 }
@@ -262,11 +283,11 @@ function showSelcWaiting() {
   document.getElementById('selc-cancel-btn').addEventListener('click', () => {
     clearInterval(selcCountdownTimer);
     chrome.runtime.sendMessage({ action: 'SELC_CANCEL' }).catch(() => {});
-    resetSelcModal();
+    resetSyncModal();
   });
 }
 
-function resetSelcModal() {
+function resetSyncModal() {
   clearInterval(selcCountdownTimer);
   const modal = document.getElementById('sync-select-modal');
   modal.classList.add('hidden');
@@ -342,7 +363,7 @@ function startSelcSync() {
         btn.textContent = '동기화';
         btn.disabled = false;
       }
-      resetSelcModal();
+      resetSyncModal();
     });
   });
 }
@@ -377,6 +398,47 @@ document.getElementById('debug-btn').addEventListener('click', () => {
   document.getElementById('debug-modal').classList.remove('hidden');
 });
 
+document.getElementById('user-settings-btn').addEventListener('click', async () => {
+  document.getElementById('user-settings-modal').classList.remove('hidden');
+  const { session } = await chrome.storage.local.get('session');
+  if (!session) return;
+  try {
+    const res = await fetch(`${SERVER_URL}/api/user/settings?session=${session}`);
+    if (res.ok) {
+      const data = await res.json();
+      document.getElementById('settings-email-input').value = data.privateEmail ?? '';
+    }
+  } catch (_) {}
+});
+
+document.getElementById('settings-save-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('settings-save-btn');
+  const email = document.getElementById('settings-email-input').value.trim();
+  const { session } = await chrome.storage.local.get('session');
+  if (!session) return;
+
+  btn.disabled = true;
+  btn.textContent = '저장 중...';
+  try {
+    const res = await fetch(`${SERVER_URL}/api/user/settings?session=${session}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ privateEmail: email || null }),
+    });
+    if (res.ok) {
+      showToast('설정이 저장되었습니다.', 'success');
+      document.getElementById('user-settings-modal').classList.add('hidden');
+    } else {
+      showToast('저장 실패. 다시 시도해주세요.', 'error');
+    }
+  } catch (_) {
+    showToast('저장 실패. 다시 시도해주세요.', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '저장';
+  }
+});
+
 document.querySelectorAll('.modal-close').forEach(btn => {
   btn.addEventListener('click', () => {
     document.getElementById(btn.dataset.modal).classList.add('hidden');
@@ -389,9 +451,120 @@ document.querySelectorAll('.modal-overlay').forEach(overlay => {
   });
 });
 
+// ─── 과목 리스트 ────────────────────────────────────────────────────────────────
+
+let subjectMap = {};
+
+function renderSubjectList(events, subjects = []) {
+  const el = document.getElementById('subject-list');
+  if (!el) return;
+
+  subjectMap = {};
+
+  // subjects API에서 가져온 전체 과목 목록을 먼저 등록 (이벤트 없어도 표시)
+  for (const s of subjects) {
+    const key = s.subjectName || s.subjectCode;
+    if (!subjectMap[key]) subjectMap[key] = { code: s.subjectCode, name: s.subjectName, videos: [], assignments: [] };
+  }
+
+  for (const e of events) {
+    const ep = e.extendedProps || {};
+    const code = ep.subjectCode || '';
+    const name = ep.subjectName || '알 수 없음';
+    const key = name || code;
+    if (!subjectMap[key]) subjectMap[key] = { code, name, videos: [], assignments: [] };
+    if (ep.type === 'assignment') subjectMap[key].assignments.push(e);
+    else subjectMap[key].videos.push(e);
+  }
+
+  const keys = Object.keys(subjectMap);
+  if (!keys.length) { el.innerHTML = ''; return; }
+
+  el.innerHTML = keys.map((key, idx) => {
+    const s = subjectMap[key];
+    const pendingVideos   = s.videos.filter(e => !e.extendedProps?.isComplete).length;
+    const pendingAssigns  = s.assignments.filter(e => !e.extendedProps?.isComplete).length;
+    return `
+      <div class="subject-item" data-idx="${idx}">
+        ${s.code ? `<span class="subject-code">${s.code}</span>` : ''}
+        <span class="subject-name">${s.name}</span>
+        <span class="subject-stats">
+          ${pendingVideos  > 0 ? `<span class="subject-stat video">영상 ${pendingVideos}</span>`  : ''}
+          ${pendingAssigns > 0 ? `<span class="subject-stat assign">과제 ${pendingAssigns}</span>` : ''}
+        </span>
+      </div>
+    `;
+  }).join('');
+
+  el.querySelectorAll('.subject-item').forEach(item => {
+    item.addEventListener('click', () => showSubjectModal(keys[parseInt(item.dataset.idx)]));
+  });
+}
+
+function showSubjectModal(key) {
+  const s = subjectMap[key];
+  if (!s) return;
+
+  const codeEl = document.getElementById('subject-modal-code');
+  codeEl.textContent = s.code;
+  codeEl.style.display = s.code ? '' : 'none';
+  document.getElementById('subject-modal-name').textContent = s.name;
+
+  const formatDate = str => {
+    if (!str) return '';
+    const [, m, d] = str.substring(0, 10).split('-');
+    return `${parseInt(m)}/${parseInt(d)}`;
+  };
+
+  const renderItems = items => {
+    if (!items.length) return '<div style="font-size:12px;color:#bbb;padding:6px 0;">항목 없음</div>';
+    return items
+      .slice()
+      .sort((a, b) => (a.start || '').localeCompare(b.start || ''))
+      .map(e => {
+        const ep = e.extendedProps || {};
+        const color = ep.isComplete ? '#8bc34a' : (ep.type === 'assignment' ? '#d32f2f' : '#f57c00');
+        return `
+          <div class="subject-event-item">
+            <div class="subject-event-dot" style="background:${color}"></div>
+            <span class="subject-event-title">${e.title || ''}</span>
+            <span class="subject-event-date">${formatDate(e.start)}</span>
+          </div>
+        `;
+      }).join('');
+  };
+
+  document.getElementById('subject-modal-body').innerHTML = `
+    ${s.videos.length > 0 ? `
+      <div class="subject-section">
+        <div class="subject-section-title"><span>영상</span><span>마감일</span></div>
+        ${renderItems(s.videos)}
+      </div>
+    ` : ''}
+    ${s.assignments.length > 0 ? `
+      <div class="subject-section">
+        <div class="subject-section-title"><span>과제</span><span>마감일</span></div>
+        ${renderItems(s.assignments)}
+      </div>
+    ` : ''}
+  `;
+
+  document.getElementById('subject-modal').classList.remove('hidden');
+}
+
 // ─── 캘린더 ───────────────────────────────────────────────────────────────────
 
 let calendarInstance = null;
+
+function mapEventColors(events) {
+  return events.map(e => {
+    const ep = e.extendedProps || {};
+    if (ep.type !== 'assignment') {
+      return { ...e, color: ep.isComplete ? '#8bc34a' : '#f57c00' };
+    }
+    return e;
+  });
+}
 
 async function loadCalendar() {
   if (typeof FullCalendar === 'undefined') return;
@@ -401,11 +574,18 @@ async function loadCalendar() {
 
   let events = [];
   try {
-    const res = await fetch(`${SERVER_URL}/api/calendar?session=${session}`);
-    if (res.ok) {
-      const data = await res.json();
-      events = data.events ?? [];
+    const [calRes, subRes] = await Promise.all([
+      fetch(`${SERVER_URL}/api/calendar?session=${session}`),
+      fetch(`${SERVER_URL}/api/subjects?session=${session}`),
+    ]);
+    const subjects = subRes.ok ? ((await subRes.json()).subjects ?? []) : [];
+    if (calRes.ok) {
+      const data = await calRes.json();
+      events = mapEventColors(data.events ?? []);
       renderSummary(data.summary ?? {});
+      renderSubjectList(events, subjects);
+    } else {
+      renderSubjectList([], subjects);
     }
   } catch (_) { /* 오프라인 등 오류 시 빈 캘린더 표시 */ }
 

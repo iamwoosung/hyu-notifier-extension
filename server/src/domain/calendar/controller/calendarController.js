@@ -24,6 +24,7 @@ async function getCalendar(req, res) {
       color: item.IsComplete ? '#388e3c' : '#d32f2f',
       extendedProps: {
         type: item.Type,
+        subjectCode: item.SubjectCode,
         subjectName: item.SubjectName,
         isComplete: item.IsComplete,
       },

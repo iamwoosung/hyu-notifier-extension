@@ -359,6 +359,56 @@ END;
 $$;
 
 -- =============================================
+-- FN: USER_SETTINGS_GET (개인 설정 조회)
+-- 반환: UserPrivateEmail
+-- =============================================
+DROP FUNCTION IF EXISTS "USER_SETTINGS_GET"(INTEGER);
+
+CREATE OR REPLACE FUNCTION "USER_SETTINGS_GET"(
+    p_UserNo INTEGER
+)
+RETURNS TABLE(
+    "UserPrivateEmail" VARCHAR(255)
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RETURN QUERY
+    SELECT u."UserPrivateEmail"
+    FROM "User" u
+    WHERE u."UserNo" = p_UserNo;
+END;
+$$;
+
+-- =============================================
+-- FN: USER_PRIVATE_EMAIL_SET (개인 이메일 설정)
+-- 반환: 0 = 성공, 9999 = 실패
+-- =============================================
+DROP FUNCTION IF EXISTS "USER_PRIVATE_EMAIL_SET"(INTEGER, VARCHAR);
+
+CREATE OR REPLACE FUNCTION "USER_PRIVATE_EMAIL_SET"(
+    p_UserNo      INTEGER,
+    p_Email       VARCHAR(255)
+)
+RETURNS INTEGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    UPDATE "User"
+    SET
+        "UserPrivateEmail" = p_Email,
+        "UserUpdateDate"   = NOW()
+    WHERE "UserNo" = p_UserNo;
+
+    RETURN 0;
+
+EXCEPTION
+    WHEN OTHERS THEN
+        RETURN 9999;
+END;
+$$;
+
+-- =============================================
 -- FN: SUBJECT_LIST_ALL (사용자의 모든 과목 조회 - 삭제된 과목 포함)
 -- 반환: 과목 목록
 -- =============================================
@@ -603,6 +653,7 @@ BEGIN
             'assignment'::VARCHAR   AS "Type",
             a."AssignmentNo"        AS "ItemNo",
             a."Title",
+            s."SubjectCode",
             s."SubjectName",
             a."PeriodEnd",
             a."IsSubmitted"         AS "IsComplete"
@@ -618,6 +669,7 @@ BEGIN
             'video'::VARCHAR        AS "Type",
             v."VideoNo"             AS "ItemNo",
             v."Title",
+            s."SubjectCode",
             s."SubjectName",
             v."PeriodEnd",
             v."IsWatched"           AS "IsComplete"
